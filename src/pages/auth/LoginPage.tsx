@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
 import { useAuthStore } from '../../stores/authStore'
+import LiquidChrome from '../../components/LiquidChrome'
 
 export default function LoginPage() {
     const navigate = useNavigate()
@@ -57,19 +58,6 @@ export default function LoginPage() {
                         </h1>
                         <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.875rem', color: '#6B6B6B' }}>
                             Sign in to continue your conversations
-                        </p>
-                    </div>
-
-                    {/* Demo Credentials */}
-                    <div style={{
-                        padding: '0.75rem 1rem',
-                        backgroundColor: '#E3F2FD',
-                        border: '1px solid #BBDEFB',
-                        borderRadius: '10px',
-                        marginBottom: '1.25rem'
-                    }}>
-                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.8rem', color: '#1565C0', margin: 0 }}>
-                            <strong>Demo:</strong> <code style={{ backgroundColor: '#BBDEFB', padding: '1px 4px', borderRadius: '3px', fontSize: '0.75rem' }}>demo@test.com</code> / <code style={{ backgroundColor: '#BBDEFB', padding: '1px 4px', borderRadius: '3px', fontSize: '0.75rem' }}>demo123</code>
                         </p>
                     </div>
 
@@ -201,40 +189,64 @@ export default function LoginPage() {
                 </div>
             </div>
 
-            {/* Decorative Panel - Hide on mobile */}
-            <div style={{
-                flex: 1,
-                background: 'linear-gradient(135deg, #FF6B6B 0%, #FFB88C 50%, #FF8787 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '2rem'
-            }} className="auth-decorative-panel">
-                <div style={{ textAlign: 'center', maxWidth: '320px' }}>
-                    <div style={{
-                        width: '80px',
-                        height: '80px',
-                        margin: '0 auto 1.5rem',
-                        backgroundColor: 'rgba(255,255,255,0.2)',
-                        borderRadius: '20px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}>
-                        <svg width="40" height="40" fill="none" stroke="white" strokeWidth="1.5" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
+            {/* Decorative Panel with LiquidChrome - Hide on mobile */}
+            <div
+                style={{
+                    flex: 1,
+                    position: 'relative',
+                    overflow: 'hidden'
+                }}
+                className="auth-decorative-panel"
+            >
+                <LiquidChrome
+                    baseColor={[1.0, 0.42, 0.42]} // Coral color (#FF6B6B)
+                    speed={0.8}
+                    amplitude={0.5}
+                    frequencyX={2.5}
+                    frequencyY={2}
+                    interactive={true}
+                />
+
+                {/* Content overlay */}
+                <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '2rem',
+                    pointerEvents: 'none'
+                }}>
+                    <div style={{ textAlign: 'center', maxWidth: '320px' }}>
+                        <div style={{
+                            width: '80px',
+                            height: '80px',
+                            margin: '0 auto 1.5rem',
+                            backgroundColor: 'rgba(0,0,0,0.1)',
+                            borderRadius: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backdropFilter: 'blur(10px)'
+                        }}>
+                            <svg width="40" height="40" fill="none" stroke="#1A1A1A" strokeWidth="1.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                        </div>
+                        <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: '#1A1A1A', marginBottom: '0.75rem' }}>
+                            Connect with anyone, anywhere
+                        </h2>
+                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: 'rgba(0,0,0,0.8)' }}>
+                            Join millions making new friends through video and text chat every day.
+                        </p>
                     </div>
-                    <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: 'white', marginBottom: '0.75rem' }}>
-                        Connect with anyone, anywhere
-                    </h2>
-                    <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)' }}>
-                        Join millions making new friends through video and text chat every day.
-                    </p>
                 </div>
             </div>
 
             {/* Mobile responsive styles */}
+
+
+
             <style>{`
         @media (max-width: 768px) {
           .auth-decorative-panel {

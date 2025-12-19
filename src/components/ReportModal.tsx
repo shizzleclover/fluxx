@@ -4,8 +4,8 @@ import type { ReportReason } from '../types'
 
 interface ReportModalProps {
     onClose: () => void
-    onSubmit: () => void
-    partnerId: string
+    onSuccess: () => void
+    reportedUserId: string
     roomId: string
 }
 
@@ -17,11 +17,13 @@ const reportReasons: { value: ReportReason; label: string }[] = [
     { value: 'other', label: 'Other' }
 ]
 
-export default function ReportModal({ onClose, onSubmit, partnerId, roomId }: ReportModalProps) {
+export default function ReportModal({ onClose, onSuccess, reportedUserId, roomId }: ReportModalProps) {
     const [reason, setReason] = useState<ReportReason | ''>('')
     const [details, setDetails] = useState('')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [submitted, setSubmitted] = useState(false)
+
+    console.log('[ReportModal] Room ID:', roomId) // For context, not sent to API
 
     const handleSubmit = async () => {
         if (!reason) return
@@ -30,16 +32,15 @@ export default function ReportModal({ onClose, onSubmit, partnerId, roomId }: Re
 
         try {
             await api.reportUser({
-                reportedUserId: partnerId,
-                roomId,
+                reportedUserId,
                 reason,
-                details: details || undefined
+                additionalDetails: details || undefined
             })
 
             setSubmitted(true)
 
             setTimeout(() => {
-                onSubmit()
+                onSuccess()
             }, 1500)
         } catch (error) {
             console.error('Failed to submit report:', error)
@@ -47,6 +48,7 @@ export default function ReportModal({ onClose, onSubmit, partnerId, roomId }: Re
             setIsSubmitting(false)
         }
     }
+
 
     if (submitted) {
         return (

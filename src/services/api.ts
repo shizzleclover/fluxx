@@ -1,179 +1,164 @@
-// Mock API service - simulates backend responses
+// Real API service - connects to backend
 import type {
     User,
     RegisterPayload,
     LoginPayload,
     VerifyPayload,
-    AuthResponse,
+    ApiResponse,
+    AuthResponseData,
     ReportPayload
 } from '../types'
 
-// Simulate network delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+// Get API base URL from environment
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://fluxx-production.up.railway.app/api'
 
-// Generate random 6-digit OTP
-const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString()
+// Helper for API requests
+async function apiRequest<T>(
+    endpoint: string,
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
+    body?: unknown,
+    includeAuth = false
+): Promise<ApiResponse<T>> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    }
 
-// Generate display name
-const generateDisplayName = () => `Fluxx_${Math.floor(1000 + Math.random() * 9000)}`
+    if (includeAuth) {
+        const token = localStorage.getItem('fluxx_token')
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`
+        }
+    }
 
-// Mock user database (in-memory)
-const mockUsers: Map<string, { user: User; password: string; otp?: string }> = new Map()
+    const options: RequestInit = {
+        method,
+        headers
+    }
 
-// Mock banned users
-const bannedEmails = new Set<string>()
+    if (body) {
+        options.body = JSON.stringify(body)
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, options)
+        const data: ApiResponse<T> = await response.json()
+
+        if (!response.ok) {
+            throw new Error(data.message || `Request failed with status ${response.status}`)
+        }
+
+        return data
+    } catch (error) {
+        console.error(`API Error [${method} ${endpoint}]:`, error)
+        throw error
+    }
+}
 
 export const api = {
     // Register new user
-    async register(payload: RegisterPayload): Promise<AuthResponse> {
-        await delay(800)
+    async register(payload: RegisterPayload): Promise<AuthResponseData> {
+        const response = await apiRequest<AuthResponseData>(
+            '/auth/register',
+            'POST',
+            payload
+        )
 
-        // Check if email already exists
-        if (mockUsers.has(payload.email)) {
-            throw new Error('Email already registered')
+        if (response.success && response.data) {
+            // Store token
+            localStorage.setItem('fluxx_token', response.data.token)
+            console.log('[API] Registered user:', payload.email)
+            return response.data
         }
 
-        const otp = generateOtp()
-        const user: User = {
-            id: crypto.randomUUID(),
-            email: payload.email,
-            displayName: generateDisplayName(),
-            isVerified: false,
-            isBanned: false,
-            createdAt: new Date().toISOString()
-        }
-
-        // Store user with OTP
-        mockUsers.set(payload.email, {
-            user,
-            password: payload.password,
-            otp
-        })
-
-        // Generate temporary token (not valid until verified)
-        const token = btoa(JSON.stringify({ email: payload.email, temp: true }))
-
-        console.log(`[Mock API] Registered user: ${payload.email}, OTP: ${otp}`)
-
-        return { user, token, otp }
+        throw new Error(response.message || 'Registration failed')
     },
 
     // Verify email with OTP
-    async verify(payload: VerifyPayload): Promise<AuthResponse> {
-        await delay(600)
+    async verify(payload: VerifyPayload): Promise<{ success: boolean }> {
+        const response = await apiRequest<void>(
+            '/auth/verify-email',
+            'POST',
+            payload
+        )
 
-        const userData = mockUsers.get(payload.email)
-
-        if (!userData) {
-            throw new Error('User not found')
+        if (response.success) {
+            console.log('[API] Verified user:', payload.email)
+            return { success: true }
         }
 
-        if (userData.otp !== payload.otp) {
-            throw new Error('Invalid OTP')
-        }
-
-        // Mark as verified
-        userData.user.isVerified = true
-        delete userData.otp
-
-        // Generate valid token
-        const token = btoa(JSON.stringify({ email: payload.email, verified: true }))
-
-        console.log(`[Mock API] Verified user: ${payload.email}`)
-
-        return { user: userData.user, token }
+        throw new Error(response.message || 'Verification failed')
     },
 
     // Resend OTP
-    async resendOtp(email: string): Promise<{ otp: string }> {
-        await delay(500)
+    async resendOtp(email: string): Promise<{ otp?: string }> {
+        const response = await apiRequest<{ otp?: string }>(
+            '/auth/resend-otp',
+            'POST',
+            { email }
+        )
 
-        const userData = mockUsers.get(email)
-
-        if (!userData) {
-            throw new Error('User not found')
+        if (response.success) {
+            console.log('[API] Resent OTP for:', email)
+            return response.data || {}
         }
 
-        const otp = generateOtp()
-        userData.otp = otp
-
-        console.log(`[Mock API] Resent OTP for: ${email}, New OTP: ${otp}`)
-
-        return { otp }
+        throw new Error(response.message || 'Failed to resend OTP')
     },
 
     // Login
-    async login(payload: LoginPayload): Promise<AuthResponse> {
-        await delay(700)
+    async login(payload: LoginPayload): Promise<AuthResponseData> {
+        const response = await apiRequest<AuthResponseData>(
+            '/auth/login',
+            'POST',
+            payload
+        )
 
-        const userData = mockUsers.get(payload.email)
-
-        if (!userData) {
-            throw new Error('Invalid email or password')
+        if (response.success && response.data) {
+            // Store token
+            localStorage.setItem('fluxx_token', response.data.token)
+            console.log('[API] Logged in user:', payload.email)
+            return response.data
         }
 
-        if (userData.password !== payload.password) {
-            throw new Error('Invalid email or password')
-        }
-
-        if (userData.user.isBanned) {
-            throw new Error(`Account banned: ${userData.user.banReason}. Expires: ${userData.user.banExpiry}`)
-        }
-
-        if (!userData.user.isVerified) {
-            // Generate new OTP for unverified users
-            const otp = generateOtp()
-            userData.otp = otp
-            throw new Error('Email not verified. Please verify your email first.')
-        }
-
-        const token = btoa(JSON.stringify({ email: payload.email, verified: true }))
-
-        console.log(`[Mock API] Logged in user: ${payload.email}`)
-
-        return { user: userData.user, token }
+        throw new Error(response.message || 'Login failed')
     },
 
     // Get current user profile
     async getProfile(): Promise<User> {
-        await delay(300)
+        const response = await apiRequest<User>(
+            '/auth/me',
+            'GET',
+            undefined,
+            true // Include auth header
+        )
 
-        // In real app, would decode token and fetch user
-        // For mock, return first verified user or throw
-        for (const [, userData] of mockUsers) {
-            if (userData.user.isVerified) {
-                return userData.user
-            }
+        if (response.success && response.data) {
+            return response.data
         }
 
-        throw new Error('Not authenticated')
+        throw new Error(response.message || 'Failed to get profile')
     },
 
     // Report user
-    async reportUser(payload: ReportPayload): Promise<{ success: boolean }> {
-        await delay(500)
+    async reportUser(payload: ReportPayload): Promise<{ userBanned: boolean; reportCount: number }> {
+        const response = await apiRequest<{ userBanned: boolean; reportCount: number }>(
+            '/reports',
+            'POST',
+            payload,
+            true // Include auth header
+        )
 
-        console.log(`[Mock API] Report submitted:`, payload)
+        if (response.success && response.data) {
+            console.log('[API] Report submitted')
+            return response.data
+        }
 
-        return { success: true }
+        throw new Error(response.message || 'Failed to submit report')
     },
 
-    // Logout
+    // Logout (clear local storage)
     async logout(): Promise<void> {
-        await delay(200)
-        console.log(`[Mock API] User logged out`)
+        localStorage.removeItem('fluxx_token')
+        console.log('[API] User logged out')
     }
 }
-
-// For testing: add a pre-verified demo user
-mockUsers.set('demo@test.com', {
-    user: {
-        id: 'demo-user-id',
-        email: 'demo@test.com',
-        displayName: 'Fluxx_Demo',
-        isVerified: true,
-        isBanned: false,
-        createdAt: new Date().toISOString()
-    },
-    password: 'demo123'
-})

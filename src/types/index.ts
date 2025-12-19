@@ -4,9 +4,11 @@ export interface User {
     email: string
     displayName: string
     isVerified: boolean
+    isAdmin?: boolean
     isBanned: boolean
     banReason?: string
     banExpiry?: string
+    reportCount?: number
     createdAt: string
 }
 
@@ -20,6 +22,7 @@ export interface AuthState {
 }
 
 export interface RegisterPayload {
+    displayName: string
     email: string
     password: string
 }
@@ -34,17 +37,24 @@ export interface VerifyPayload {
     otp: string
 }
 
-export interface AuthResponse {
+// API Response wrapper
+export interface ApiResponse<T = unknown> {
+    success: boolean
+    message?: string
+    data?: T
+}
+
+export interface AuthResponseData {
     user: User
     token: string
-    otp?: string // Only returned after registration for demo
+    otp?: string // Only returned after registration (dev mode)
 }
 
 // Match types
 export interface Match {
     roomId: string
     partnerId: string
-    partnerName: string
+    partnerName?: string
 }
 
 export type QueueStatus = 'idle' | 'searching' | 'matched' | 'connecting' | 'connected'
@@ -74,9 +84,8 @@ export type ReportReason =
 
 export interface ReportPayload {
     reportedUserId: string
-    roomId: string
     reason: ReportReason
-    details?: string
+    additionalDetails?: string
 }
 
 // Socket events
@@ -86,13 +95,18 @@ export interface SocketEvents {
     leave_queue: () => void
     next_match: () => void
     end_chat: () => void
-    offer: (data: { roomId: string; offer: RTCSessionDescriptionInit }) => void
-    answer: (data: { roomId: string; answer: RTCSessionDescriptionInit }) => void
+    webrtc_offer: (data: { roomId: string; offer: RTCSessionDescriptionInit }) => void
+    webrtc_answer: (data: { roomId: string; answer: RTCSessionDescriptionInit }) => void
     ice_candidate: (data: { roomId: string; candidate: RTCIceCandidateInit }) => void
 
     // Server -> Client
-    queue_joined: () => void
+    queue_joined: (data: { position: number; message: string }) => void
+    queue_left: (data: { message: string }) => void
     match_found: (match: Match) => void
-    partner_left: () => void
-    user_banned: (data: { reason: string; expiry: string }) => void
+    match_ended: (data: { reason: string }) => void
+    chat_ended: (data: { message: string }) => void
+    partner_left: (data: { reason: string }) => void
+    partner_disconnected: (data: { message: string; autoRejoin: boolean }) => void
+    banned: (data: { message: string; banExpiresAt: string; banReason: string }) => void
+    error: (data: { message: string }) => void
 }

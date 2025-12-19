@@ -8,27 +8,78 @@ import { webrtcService } from '../../services/webrtc'
 export default function MainPage() {
     const navigate = useNavigate()
     const { user, logout } = useAuthStore()
-    const { queueStatus, setQueueStatus } = useMatchStore()
+    const { queueStatus, setQueueStatus, setCurrentMatch } = useMatchStore()
 
     // Connect socket on mount
     useEffect(() => {
-        if (!socketService.connected) {
-            socketService.connect()
+        const connectSocket = async () => {
+            if (!socketService.isConnected) {
+                try {
+                    await socketService.connect()
+                    console.log('[MainPage] Socket connected')
+                } catch (error) {
+                    console.error('[MainPage] Socket connection failed:', error)
+                }
+            }
         }
 
-        // Listen for match found
-        socketService.on('match_found', () => {
+        connectSocket()
+
+        // Listen for queue events
+        const handleQueueJoined = () => {
+            console.log('[MainPage] Queue joined')
+            setQueueStatus('searching')
+        }
+
+        const handleQueueLeft = () => {
+            console.log('[MainPage] Queue left')
+            setQueueStatus('idle')
+        }
+
+        const handleMatchFound = (data: unknown) => {
+            const matchData = data as { roomId: string; partnerId: string }
+            console.log('[MainPage] Match found:', matchData)
+            setQueueStatus('matched')
+            setCurrentMatch({
+                roomId: matchData.roomId,
+                partnerId: matchData.partnerId
+            })
+            // Navigate to chat page
             navigate('/chat')
-        })
+        }
+
+        const handleError = (data: unknown) => {
+            const errorData = data as { message: string }
+            console.error('[MainPage] Socket error:', errorData.message)
+            setQueueStatus('idle')
+        }
+
+        const handleBanned = (data: unknown) => {
+            const banData = data as { message: string; banReason: string }
+            console.error('[MainPage] User banned:', banData.message)
+            alert(`You have been banned: ${banData.banReason}`)
+            logout()
+            navigate('/')
+        }
+
+        socketService.on('queue_joined', handleQueueJoined)
+        socketService.on('queue_left', handleQueueLeft)
+        socketService.on('match_found', handleMatchFound)
+        socketService.on('error', handleError)
+        socketService.on('banned', handleBanned)
 
         return () => {
-            socketService.off('match_found')
+            socketService.off('queue_joined', handleQueueJoined)
+            socketService.off('queue_left', handleQueueLeft)
+            socketService.off('match_found', handleMatchFound)
+            socketService.off('error', handleError)
+            socketService.off('banned', handleBanned)
         }
-    }, [navigate])
+    }, [navigate, setQueueStatus, setCurrentMatch, logout])
 
     const handleStartVideo = async () => {
         try {
-            // Request camera/mic permissions
+            // Request camera/mic permissions and start local video
             await webrtcService.getLocalStream()
 
             // Join matchmaking queue
@@ -41,6 +92,8 @@ export default function MainPage() {
 
     const handleCancelSearch = () => {
         socketService.leaveQueue()
+        webrtcService.stopLocalStream()
+        setQueueStatus('idle')
     }
 
     const handleLogout = () => {
@@ -81,7 +134,7 @@ export default function MainPage() {
                             justifyContent: 'center'
                         }}>
                             <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, color: '#FF6B6B' }}>
-                                {user?.displayName?.charAt(6) || 'U'}
+                                {user?.displayName?.charAt(0)?.toUpperCase() || 'U'}
                             </span>
                         </div>
                         <span style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.875rem', color: '#2D2D2D' }}>

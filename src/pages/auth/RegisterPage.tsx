@@ -2,25 +2,54 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
 import { useAuthStore } from '../../stores/authStore'
+import LiquidChrome from '../../components/LiquidChrome'
 
 export default function RegisterPage() {
     const navigate = useNavigate()
     const { setPendingVerification, setLoading, setError, isLoading, error } = useAuthStore()
 
+    const [displayName, setDisplayName] = useState('')
+    const [displayNameError, setDisplayNameError] = useState('')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
-    const [registeredOtp, setRegisteredOtp] = useState<string | null>(null)
+
+    // Display name validation
+    const validateDisplayName = (value: string): string => {
+        if (value.length < 3) return 'Display name must be at least 3 characters'
+        if (value.length > 20) return 'Display name cannot exceed 20 characters'
+        if (!/^[a-zA-Z0-9_-]+$/.test(value)) return 'Only letters, numbers, _ and - allowed'
+        if (/^[_-]/.test(value) || /[_-]$/.test(value)) return 'Cannot start or end with _ or -'
+        return ''
+    }
+
+    const handleDisplayNameChange = (value: string) => {
+        setDisplayName(value)
+        if (value) {
+            setDisplayNameError(validateDisplayName(value))
+        } else {
+            setDisplayNameError('')
+        }
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+
+        // Validate display name before submit
+        const displayNameValidation = validateDisplayName(displayName)
+        if (displayNameValidation) {
+            setDisplayNameError(displayNameValidation)
+            return
+        }
+
         setError(null)
         setLoading(true)
 
         try {
-            const response = await api.register({ email, password })
-            setPendingVerification(email, response.otp || '')
-            setRegisteredOtp(response.otp || null)
+            await api.register({ displayName: displayName.toLowerCase(), email, password })
+            setPendingVerification(email, '')
+            // Navigate to verify page - user must check their email for OTP
+            navigate('/verify')
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Registration failed')
         } finally {
@@ -28,184 +57,55 @@ export default function RegisterPage() {
         }
     }
 
-    const handleCopyOtp = () => {
-        if (registeredOtp) {
-            navigator.clipboard.writeText(registeredOtp)
-        }
-    }
-
-    const handleProceedToVerify = () => {
-        navigate('/verify')
-    }
-
-    // OTP Display after registration
-    if (registeredOtp) {
-        return (
-            <div style={{ minHeight: '100vh', display: 'flex', backgroundColor: '#FFFBF5' }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 'clamp(1.5rem, 5vw, 4rem)' }}>
-                    <div style={{ maxWidth: '420px', width: '100%', margin: '0 auto', textAlign: 'center' }}>
-                        <Link to="/" style={{ display: 'inline-block', marginBottom: '1.5rem', textDecoration: 'none' }}>
-                            <span style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.75rem', fontWeight: 700, color: '#FF6B6B' }}>Fluxx</span>
-                        </Link>
-
-                        <div style={{
-                            width: '70px',
-                            height: '70px',
-                            margin: '0 auto 1.25rem',
-                            backgroundColor: '#E8F5E9',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}>
-                            <svg width="35" height="35" fill="none" stroke="#4CAF50" strokeWidth="2" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-
-                        <h1 style={{ fontFamily: 'Outfit, sans-serif', fontSize: 'clamp(1.25rem, 5vw, 1.5rem)', fontWeight: 700, color: '#2D2D2D', marginBottom: '0.4rem' }}>
-                            Registration Successful!
-                        </h1>
-                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.875rem', color: '#6B6B6B', marginBottom: '1.5rem' }}>
-                            Enter the OTP below to verify your email
-                        </p>
-
-                        <div style={{
-                            backgroundColor: '#FFF4E6',
-                            border: '2px dashed #FF6B6B',
-                            borderRadius: '14px',
-                            padding: '1.5rem',
-                            marginBottom: '1.25rem'
-                        }}>
-                            <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.8rem', color: '#6B6B6B', marginBottom: '0.5rem' }}>
-                                Your verification code:
-                            </p>
-                            <div style={{
-                                fontFamily: 'JetBrains Mono, monospace',
-                                fontSize: 'clamp(2rem, 8vw, 2.5rem)',
-                                fontWeight: 700,
-                                color: '#FF6B6B',
-                                letterSpacing: '0.4rem',
-                                marginBottom: '0.75rem'
-                            }}>
-                                {registeredOtp}
-                            </div>
-                            <button
-                                onClick={handleCopyOtp}
-                                style={{
-                                    padding: '0.4rem 0.875rem',
-                                    backgroundColor: 'transparent',
-                                    border: '1px solid #FF6B6B',
-                                    borderRadius: '6px',
-                                    color: '#FF6B6B',
-                                    fontFamily: 'DM Sans, sans-serif',
-                                    fontSize: '0.8rem',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Copy OTP
-                            </button>
-                        </div>
-
-                        <button
-                            onClick={handleProceedToVerify}
-                            style={{
-                                width: '100%',
-                                padding: '12px',
-                                backgroundColor: '#FF6B6B',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '10px',
-                                fontFamily: 'Outfit, sans-serif',
-                                fontWeight: 600,
-                                fontSize: '0.9rem',
-                                cursor: 'pointer',
-                                marginBottom: '0.75rem'
-                            }}
-                        >
-                            Proceed to Verify Email
-                        </button>
-
-                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.8rem', color: '#9B9B9B' }}>
-                            Email sent to: <strong>{email}</strong>
-                        </p>
-                    </div>
-                </div>
+    // Registration Form
+    return (
+        <div style={{ minHeight: '100vh', display: 'flex', backgroundColor: '#FFFBF5' }}>
+            {/* Decorative Panel with LiquidChrome */}
+            <div
+                style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+                className="auth-decorative-panel"
+            >
+                <LiquidChrome
+                    baseColor={[0.72, 0.71, 1.0]} // Lavender color
+                    speed={0.7}
+                    amplitude={0.45}
+                    frequencyX={2.5}
+                    frequencyY={2}
+                    interactive={true}
+                />
 
                 <div style={{
-                    flex: 1,
-                    background: 'linear-gradient(135deg, #A8E6CF 0%, #FFB88C 50%, #FF8787 100%)',
+                    position: 'absolute',
+                    inset: 0,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    padding: '2rem'
-                }} className="auth-decorative-panel">
+                    padding: '2rem',
+                    pointerEvents: 'none'
+                }}>
                     <div style={{ textAlign: 'center', maxWidth: '320px' }}>
                         <div style={{
                             width: '80px',
                             height: '80px',
                             margin: '0 auto 1.5rem',
-                            backgroundColor: 'rgba(255,255,255,0.25)',
+                            backgroundColor: 'rgba(0,0,0,0.1)',
                             borderRadius: '20px',
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center'
+                            justifyContent: 'center',
+                            backdropFilter: 'blur(10px)'
                         }}>
-                            <svg width="40" height="40" fill="none" stroke="white" strokeWidth="1.5" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            <svg width="40" height="40" fill="none" stroke="#1A1A1A" strokeWidth="1.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                             </svg>
                         </div>
-                        <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: 'white', marginBottom: '0.75rem' }}>
-                            Almost there!
+                        <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: '#1A1A1A', marginBottom: '0.75rem' }}>
+                            Meet new people today
                         </h2>
-                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)' }}>
-                            Verify your email to start making connections on Fluxx.
+                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: 'rgba(0,0,0,0.8)' }}>
+                            Join thousands making meaningful connections every day.
                         </p>
                     </div>
-                </div>
-
-                <style>{`
-          @media (max-width: 768px) {
-            .auth-decorative-panel { display: none !important; }
-          }
-        `}</style>
-            </div>
-        )
-    }
-
-    // Registration Form
-    return (
-        <div style={{ minHeight: '100vh', display: 'flex', backgroundColor: '#FFFBF5' }}>
-            {/* Decorative Panel */}
-            <div style={{
-                flex: 1,
-                background: 'linear-gradient(135deg, #B8B5FF 0%, #A8E6CF 50%, #FFB88C 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '2rem'
-            }} className="auth-decorative-panel">
-                <div style={{ textAlign: 'center', maxWidth: '320px' }}>
-                    <div style={{
-                        width: '80px',
-                        height: '80px',
-                        margin: '0 auto 1.5rem',
-                        backgroundColor: 'rgba(255,255,255,0.25)',
-                        borderRadius: '20px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}>
-                        <svg width="40" height="40" fill="none" stroke="white" strokeWidth="1.5" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                    </div>
-                    <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: 'white', marginBottom: '0.75rem' }}>
-                        Meet new people today
-                    </h2>
-                    <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)' }}>
-                        Join thousands making meaningful connections every day.
-                    </p>
                 </div>
             </div>
 
@@ -240,6 +140,48 @@ export default function RegisterPage() {
                     )}
 
                     <form onSubmit={handleSubmit}>
+                        {/* Display Name */}
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', fontFamily: 'DM Sans, sans-serif', fontSize: '0.8rem', fontWeight: 500, color: '#2D2D2D', marginBottom: '0.4rem' }}>
+                                Display Name
+                            </label>
+                            <div style={{ position: 'relative' }}>
+                                <svg style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#9B9B9B' }} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                    <circle cx="12" cy="7" r="4" />
+                                </svg>
+                                <input
+                                    type="text"
+                                    value={displayName}
+                                    onChange={(e) => handleDisplayNameChange(e.target.value)}
+                                    placeholder="cooluser123"
+                                    required
+                                    minLength={3}
+                                    maxLength={20}
+                                    style={{
+                                        width: '100%',
+                                        padding: '12px 12px 12px 40px',
+                                        backgroundColor: 'white',
+                                        border: `1px solid ${displayNameError ? '#EF4444' : '#E5E5E5'}`,
+                                        borderRadius: '10px',
+                                        fontFamily: 'DM Sans, sans-serif',
+                                        fontSize: '0.875rem',
+                                        outline: 'none',
+                                        boxSizing: 'border-box'
+                                    }}
+                                />
+                            </div>
+                            {displayNameError && (
+                                <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.75rem', color: '#EF4444', marginTop: '0.25rem', marginBottom: 0 }}>
+                                    {displayNameError}
+                                </p>
+                            )}
+                            <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.7rem', color: '#9B9B9B', marginTop: '0.25rem', marginBottom: 0 }}>
+                                3-20 characters, letters, numbers, _ and - only
+                            </p>
+                        </div>
+
+                        {/* Email */}
                         <div style={{ marginBottom: '1rem' }}>
                             <label style={{ display: 'block', fontFamily: 'DM Sans, sans-serif', fontSize: '0.8rem', fontWeight: 500, color: '#2D2D2D', marginBottom: '0.4rem' }}>
                                 Email

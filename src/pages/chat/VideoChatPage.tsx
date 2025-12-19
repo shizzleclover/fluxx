@@ -8,13 +8,14 @@ import ReportModal from '../../components/ReportModal'
 
 export default function VideoChatPage() {
     const navigate = useNavigate()
-    const { currentMatch, queueStatus, reset: resetMatch } = useMatchStore()
+    const { currentMatch, queueStatus, setQueueStatus, reset: resetMatch } = useMatchStore()
     const {
-        localStream,
-        remoteStream,
         isMuted,
         isVideoOn,
         connectionStatus,
+        setLocalStream,
+        setRemoteStream,
+        setConnectionStatus,
         toggleMute,
         toggleVideo,
         reset: resetVideo
@@ -25,64 +26,133 @@ export default function VideoChatPage() {
     const [showReportModal, setShowReportModal] = useState(false)
     const [partnerLeft, setPartnerLeft] = useState(false)
 
-    // Setup video streams
+    // Setup WebRTC callbacks and create peer connection when match is found
     useEffect(() => {
-        if (localVideoRef.current && localStream) {
-            localVideoRef.current.srcObject = localStream
-        }
-    }, [localStream])
+        if (!currentMatch) return
 
-    useEffect(() => {
-        if (remoteVideoRef.current && remoteStream) {
-            remoteVideoRef.current.srcObject = remoteStream
-        }
-    }, [remoteStream])
+        const setupWebRTC = async () => {
+            console.log('[VideoChatPage] Setting up WebRTC for room:', currentMatch.roomId)
+            setConnectionStatus('connecting')
+            setQueueStatus('connecting')
 
-    // Start mock connection when matched
-    useEffect(() => {
-        if (currentMatch && queueStatus === 'connected') {
-            webrtcService.startMockConnection()
+            // Setup callbacks
+            webrtcService.onLocalStream = (stream) => {
+                console.log('[VideoChatPage] Local stream received')
+                setLocalStream(stream)
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = stream
+                }
+            }
+
+            webrtcService.onRemoteStream = (stream) => {
+                console.log('[VideoChatPage] Remote stream received')
+                setRemoteStream(stream)
+                if (remoteVideoRef.current) {
+                    remoteVideoRef.current.srcObject = stream
+                    remoteVideoRef.current.play().catch(console.error)
+                }
+            }
+
+            webrtcService.onConnectionStateChange = (state) => {
+                console.log('[VideoChatPage] Connection state:', state)
+                if (state === 'connected') {
+                    setConnectionStatus('connected')
+                    setQueueStatus('connected')
+                } else if (state === 'failed' || state === 'disconnected') {
+                    setConnectionStatus('failed')
+                }
+            }
+
+            // Create peer connection (initiator sends offer)
+            await webrtcService.createPeerConnection(true)
         }
-    }, [currentMatch, queueStatus])
+
+        setupWebRTC()
+
+        return () => {
+            webrtcService.onLocalStream = null
+            webrtcService.onRemoteStream = null
+            webrtcService.onConnectionStateChange = null
+        }
+    }, [currentMatch, setConnectionStatus, setQueueStatus, setLocalStream, setRemoteStream])
 
     // Listen for partner leaving
     useEffect(() => {
         const handlePartnerLeft = () => {
+            console.log('[VideoChatPage] Partner left')
             setPartnerLeft(true)
+            webrtcService.cleanup()
+            setConnectionStatus('disconnected')
+
+            // Auto-rejoin queue after delay
             setTimeout(() => {
                 setPartnerLeft(false)
-                socketService.joinQueue()
+                setQueueStatus('searching')
             }, 2000)
         }
 
-        socketService.on('partner_left', handlePartnerLeft)
-        return () => {
-            socketService.off('partner_left', handlePartnerLeft)
+        const handlePartnerDisconnected = () => {
+            console.log('[VideoChatPage] Partner disconnected')
+            setPartnerLeft(true)
+            webrtcService.cleanup()
+            setConnectionStatus('disconnected')
         }
-    }, [])
 
-    // Listen for new matches
-    useEffect(() => {
-        const handleMatchFound = () => {
+        const handleMatchEnded = () => {
+            console.log('[VideoChatPage] Match ended')
+            webrtcService.cleanup()
+            setConnectionStatus('disconnected')
+        }
+
+        const handleNewMatchFound = (data: unknown) => {
+            const matchData = data as { roomId: string; partnerId: string }
+            console.log('[VideoChatPage] New match found:', matchData)
             setPartnerLeft(false)
         }
 
-        socketService.on('match_found', handleMatchFound)
-        return () => {
-            socketService.off('match_found', handleMatchFound)
-        }
-    }, [])
+        socketService.on('partner_left', handlePartnerLeft)
+        socketService.on('partner_disconnected', handlePartnerDisconnected)
+        socketService.on('match_ended', handleMatchEnded)
+        socketService.on('match_found', handleNewMatchFound)
 
-    // Redirect if no match
+        return () => {
+            socketService.off('partner_left', handlePartnerLeft)
+            socketService.off('partner_disconnected', handlePartnerDisconnected)
+            socketService.off('match_ended', handleMatchEnded)
+            socketService.off('match_found', handleNewMatchFound)
+        }
+    }, [setConnectionStatus, setQueueStatus])
+
+    // Redirect if no match and idle
     useEffect(() => {
         if (!currentMatch && queueStatus === 'idle') {
             navigate('/app')
         }
     }, [currentMatch, queueStatus, navigate])
 
+    // Get local stream from webrtc service
+    const localStream = webrtcService.getStream()
+    const remoteStream = webrtcService.getRemoteStream()
+
+    // Display local video
+    useEffect(() => {
+        if (localVideoRef.current && localStream) {
+            localVideoRef.current.srcObject = localStream
+        }
+    }, [localStream])
+
+    // Display remote video
+    useEffect(() => {
+        if (remoteVideoRef.current && remoteStream) {
+            remoteVideoRef.current.srcObject = remoteStream
+        }
+    }, [remoteStream])
+
     const handleNext = () => {
         setPartnerLeft(false)
+        webrtcService.cleanup()
         socketService.nextMatch()
+        setQueueStatus('searching')
     }
 
     const handleEndChat = () => {
@@ -94,13 +164,15 @@ export default function VideoChatPage() {
     }
 
     const handleToggleMute = () => {
+        const newMuted = !isMuted
         toggleMute()
-        webrtcService.toggleMute()
+        webrtcService.toggleMute(newMuted)
     }
 
     const handleToggleVideo = () => {
+        const newVideoOn = !isVideoOn
         toggleVideo()
-        webrtcService.toggleVideo()
+        webrtcService.toggleVideo(newVideoOn)
     }
 
     const isSearching = queueStatus === 'searching' || queueStatus === 'matched' || queueStatus === 'connecting'
@@ -181,7 +253,7 @@ export default function VideoChatPage() {
                     )}
                 </div>
 
-                {/* Local Video (Picture-in-Picture) - responsive sizing */}
+                {/* Local Video (Picture-in-Picture) */}
                 <div style={{
                     position: 'absolute',
                     bottom: '90px',
@@ -204,188 +276,136 @@ export default function VideoChatPage() {
                                 width: '100%',
                                 height: '100%',
                                 objectFit: 'cover',
-                                transform: 'scaleX(-1)',
-                                opacity: isVideoOn ? 1 : 0.3
+                                transform: 'scaleX(-1)'
                             }}
                         />
                     ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <svg width="32" height="32" fill="none" stroke="#6B6B6B" strokeWidth="1.5" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                            </svg>
-                        </div>
-                    )}
-
-                    {/* Mute indicator */}
-                    {isMuted && (
                         <div style={{
-                            position: 'absolute',
-                            bottom: '6px',
-                            left: '6px',
-                            backgroundColor: 'rgba(239, 68, 68, 0.9)',
-                            borderRadius: '4px',
-                            padding: '3px 5px'
+                            width: '100%',
+                            height: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: '#2D2D2D'
                         }}>
-                            <svg width="10" height="10" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                            <svg width="24" height="24" fill="none" stroke="#6B6B6B" strokeWidth="1.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                             </svg>
                         </div>
                     )}
                 </div>
-
-                {/* Partner Name */}
-                {currentMatch && isConnected && (
-                    <div style={{
-                        position: 'absolute',
-                        top: '12px',
-                        left: '12px',
-                        backgroundColor: 'rgba(0,0,0,0.5)',
-                        borderRadius: '8px',
-                        padding: '6px 12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                    }}>
-                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50' }} />
-                        <span style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.75rem', color: 'white' }}>
-                            {currentMatch.partnerName}
-                        </span>
-                    </div>
-                )}
             </div>
 
-            {/* Controls Bar - Mobile optimized */}
+            {/* Control Bar */}
             <div style={{
-                padding: '0.75rem 1rem',
-                paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
-                backgroundColor: '#1A1A1A',
-                borderTop: '1px solid rgba(255,255,255,0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem'
+                padding: '12px 16px',
+                backgroundColor: 'rgba(0,0,0,0.8)',
+                borderTop: '1px solid rgba(255,255,255,0.1)'
             }}>
-                {/* Mute Button */}
-                <button onClick={handleToggleMute} style={controlBtnStyle(!isMuted)} title={isMuted ? 'Unmute' : 'Mute'}>
-                    {isMuted ? (
-                        // Muted - show mic with X
-                        <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 19L5 5M12 18.75a6 6 0 01-6-6v-1.5m6 7.5a6 6 0 006-6v-1.5m-6 7.5v3.75m-3.75 0h7.5M12 14.25a3 3 0 01-3-3V5.25a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                        </svg>
-                    ) : (
-                        // Unmuted - show normal mic
-                        <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 14.25a3 3 0 01-3-3V5.25a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                        </svg>
-                    )}
-                </button>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                }}>
+                    {/* Mute Button */}
+                    <button
+                        onClick={handleToggleMute}
+                        style={controlBtnStyle(!isMuted)}
+                        title={isMuted ? 'Unmute' : 'Mute'}
+                    >
+                        {isMuted ? (
+                            <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                            </svg>
+                        ) : (
+                            <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                            </svg>
+                        )}
+                    </button>
 
-                {/* Video Button */}
-                <button onClick={handleToggleVideo} style={controlBtnStyle(isVideoOn)} title={isVideoOn ? 'Turn off camera' : 'Turn on camera'}>
-                    {isVideoOn ? (
-                        // Video ON - show normal camera
+                    {/* Video Toggle Button */}
+                    <button
+                        onClick={handleToggleVideo}
+                        style={controlBtnStyle(isVideoOn)}
+                        title={isVideoOn ? 'Turn off camera' : 'Turn on camera'}
+                    >
+                        {isVideoOn ? (
+                            <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                        ) : (
+                            <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                <line x1="2" y1="2" x2="22" y2="22" stroke="white" strokeWidth="2" />
+                            </svg>
+                        )}
+                    </button>
+
+                    {/* Next Button */}
+                    <button
+                        onClick={handleNext}
+                        style={{
+                            ...controlBtnStyle(true),
+                            backgroundColor: '#FF6B6B'
+                        }}
+                        title="Next match"
+                    >
                         <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                         </svg>
-                    ) : (
-                        // Video OFF - show crossed camera
+                    </button>
+
+                    {/* End Chat Button */}
+                    <button
+                        onClick={handleEndChat}
+                        style={controlBtnStyle(false, true)}
+                        title="End chat"
+                    >
                         <svg width="22" height="22" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 01-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-1.409c.407-.407.659-.97.659-1.591v-9a2.25 2.25 0 00-2.25-2.25h-9c-.621 0-1.184.252-1.591.659m12.182 12.182L2.909 5.909M1.5 4.5l1.409 1.409" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
-                    )}
-                </button>
+                    </button>
 
-                {/* Next Button (Primary) */}
-                <button
-                    onClick={handleNext}
-                    style={{
-                        padding: '0 1.25rem',
-                        height: '48px',
-                        borderRadius: '24px',
-                        border: 'none',
-                        backgroundColor: '#FF6B6B',
-                        color: 'white',
-                        fontFamily: 'Outfit, sans-serif',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.4rem',
-                        boxShadow: '0 4px 12px rgba(255, 107, 107, 0.3)',
-                        flexShrink: 0
-                    }}
-                >
-                    <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                    </svg>
-                    Next
-                </button>
-
-                {/* End Chat Button */}
-                <button
-                    onClick={handleEndChat}
-                    style={{
-                        width: '48px',
-                        height: '48px',
-                        minWidth: '48px',
-                        borderRadius: '50%',
-                        border: '2px solid rgba(255,255,255,0.2)',
-                        backgroundColor: 'transparent',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0
-                    }}
-                    title="End chat"
-                >
-                    <svg width="20" height="20" fill="none" stroke="#EF4444" strokeWidth="2.5" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-
-                {/* Report Button */}
-                <button
-                    onClick={() => setShowReportModal(true)}
-                    style={{
-                        width: '48px',
-                        height: '48px',
-                        minWidth: '48px',
-                        borderRadius: '50%',
-                        border: '2px solid rgba(255,255,255,0.2)',
-                        backgroundColor: 'transparent',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0
-                    }}
-                    title="Report user"
-                >
-                    <svg width="18" height="18" fill="none" stroke="#9B9B9B" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
-                    </svg>
-                </button>
+                    {/* Report Button */}
+                    <button
+                        onClick={() => setShowReportModal(true)}
+                        style={{
+                            ...controlBtnStyle(true),
+                            backgroundColor: 'rgba(255,255,255,0.1)'
+                        }}
+                        title="Report user"
+                    >
+                        <svg width="20" height="20" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2m0 0h17M9 7h1m-1 4h1" />
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             {/* Report Modal */}
-            {showReportModal && (
+            {showReportModal && currentMatch && (
                 <ReportModal
+                    reportedUserId={currentMatch.partnerId}
+                    roomId={currentMatch.roomId}
                     onClose={() => setShowReportModal(false)}
-                    onSubmit={() => setShowReportModal(false)}
-                    partnerId={currentMatch?.partnerId || ''}
-                    roomId={currentMatch?.roomId || ''}
+                    onSuccess={() => {
+                        setShowReportModal(false)
+                        handleNext()
+                    }}
                 />
             )}
 
+            {/* CSS Animations */}
             <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
         </div>
     )
 }

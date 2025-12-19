@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 
@@ -164,16 +163,17 @@ export default function HomePage() {
                         </div>
                     </div>
 
-                    {/* Right Side - Illustration */}
-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                    {/* Right Side - Illustrations */}
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
                         <img
-                            src="/illustration.png"
+                            src="/illustration1.png"
                             alt="Video chat illustration"
-                            style={{ maxWidth: '100%', height: 'auto', maxHeight: '450px' }}
-                            onError={(e) => {
-                                // Hide if image not found
-                                e.currentTarget.style.display = 'none'
-                            }}
+                            style={{ maxWidth: '100%', height: 'auto', maxHeight: '280px' }}
+                        />
+                        <img
+                            src="/illustration2.png"
+                            alt="Group video chat illustration"
+                            style={{ maxWidth: '100%', height: 'auto', maxHeight: '280px' }}
                         />
                     </div>
                 </div>

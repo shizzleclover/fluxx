@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
 import { useAuthStore } from '../../stores/authStore'
+import LiquidChrome from '../../components/LiquidChrome'
 
 export default function VerifyPage() {
     const navigate = useNavigate()
@@ -9,7 +10,6 @@ export default function VerifyPage() {
         pendingEmail,
         pendingOtp,
         setUser,
-        setToken,
         clearPendingVerification,
         setLoading,
         setError,
@@ -42,11 +42,14 @@ export default function VerifyPage() {
         setLoading(true)
 
         try {
-            const response = await api.verify({ email, otp })
+            // Verify email with OTP
+            await api.verify({ email, otp })
 
-            // Update auth store
-            setUser(response.user)
-            setToken(response.token)
+            // Fetch updated user profile (with isVerified = true)
+            const user = await api.getProfile()
+
+            // Update auth store with verified user
+            setUser(user)
             clearPendingVerification()
 
             setIsSuccess(true)
@@ -71,7 +74,10 @@ export default function VerifyPage() {
 
         try {
             const response = await api.resendOtp(email)
-            setOtp(response.otp)
+            // Only auto-fill OTP in dev mode (when OTP is returned)
+            if (response.otp) {
+                setOtp(response.otp)
+            }
             setResendCooldown(30) // 30 second cooldown
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to resend OTP')
@@ -113,7 +119,7 @@ export default function VerifyPage() {
     return (
         <div style={{ minHeight: '100vh', display: 'flex', backgroundColor: '#FFFBF5' }}>
             {/* Left Side - Form */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '2rem 4rem' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 'clamp(1.5rem, 5vw, 4rem)' }}>
                 <div style={{ maxWidth: '420px', width: '100%', margin: '0 auto' }}>
                     {/* Logo */}
                     <Link to="/" style={{ display: 'inline-block', marginBottom: '2rem', textDecoration: 'none' }}>
@@ -261,38 +267,60 @@ export default function VerifyPage() {
                 </div>
             </div>
 
-            {/* Right Side - Decorative */}
-            <div style={{
-                flex: 1,
-                background: 'linear-gradient(135deg, #FFB88C 0%, #FF8787 50%, #FF6B6B 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '3rem'
-            }}>
-                <div style={{ textAlign: 'center', maxWidth: '400px' }}>
-                    <div style={{
-                        width: '96px',
-                        height: '96px',
-                        margin: '0 auto 2rem',
-                        backgroundColor: 'rgba(255,255,255,0.2)',
-                        borderRadius: '24px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}>
-                        <svg width="48" height="48" fill="none" stroke="white" strokeWidth="1.5" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                        </svg>
+            {/* Right Side - LiquidChrome */}
+            <div
+                style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+                className="auth-decorative-panel"
+            >
+                <LiquidChrome
+                    baseColor={[1.0, 0.55, 0.55]} // Warm coral/salmon
+                    speed={0.6}
+                    amplitude={0.5}
+                    frequencyX={2}
+                    frequencyY={2.5}
+                    interactive={true}
+                />
+
+                <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '2rem',
+                    pointerEvents: 'none'
+                }}>
+                    <div style={{ textAlign: 'center', maxWidth: '320px' }}>
+                        <div style={{
+                            width: '80px',
+                            height: '80px',
+                            margin: '0 auto 1.5rem',
+                            backgroundColor: 'rgba(0,0,0,0.1)',
+                            borderRadius: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backdropFilter: 'blur(10px)'
+                        }}>
+                            <svg width="40" height="40" fill="none" stroke="#1A1A1A" strokeWidth="1.5" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                            </svg>
+                        </div>
+                        <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.5rem', fontWeight: 700, color: '#1A1A1A', marginBottom: '0.75rem' }}>
+                            One last step
+                        </h2>
+                        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: 'rgba(0,0,0,0.8)' }}>
+                            Verify your email to unlock all features and start chatting.
+                        </p>
                     </div>
-                    <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.875rem', fontWeight: 700, color: 'white', marginBottom: '1rem' }}>
-                        One last step
-                    </h2>
-                    <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: '1.125rem', color: 'rgba(255,255,255,0.9)' }}>
-                        Verify your email to unlock all features and start chatting.
-                    </p>
                 </div>
             </div>
+
+            <style>{`
+                @media (max-width: 768px) {
+                    .auth-decorative-panel { display: none !important; }
+                }
+            `}</style>
         </div>
     )
 }

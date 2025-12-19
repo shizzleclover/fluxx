@@ -1,169 +1,248 @@
-// Mock Socket service - simulates Socket.IO for matchmaking
-import { useMatchStore } from '../stores/matchStore'
-import { useVideoStore } from '../stores/videoStore'
+// Real Socket.IO service - connects to backend
+import { io, Socket } from 'socket.io-client'
 import type { Match } from '../types'
 
-type EventCallback = (...args: unknown[]) => void
+// Get Socket URL from environment (same host as API, without /api)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://fluxx-production.up.railway.app/api'
+const SOCKET_URL = API_BASE_URL.replace('/api', '')
 
-class MockSocketService {
-    private isConnected = false
-    private eventListeners: Map<string, EventCallback[]> = new Map()
-    private matchTimeout: ReturnType<typeof setTimeout> | null = null
+class SocketService {
+    private socket: Socket | null = null
+    private listeners: Map<string, Set<(...args: unknown[]) => void>> = new Map()
 
-    // Connect to socket (called after auth)
+    // Connection state
+    isConnected = false
+    currentRoomId: string | null = null
+    partnerId: string | null = null
+
+    // Connect to server with JWT auth
     connect(): Promise<void> {
-        return new Promise((resolve) => {
-            setTimeout(() => {
+        return new Promise((resolve, reject) => {
+            const token = localStorage.getItem('fluxx_token')
+
+            if (!token) {
+                reject(new Error('No token available'))
+                return
+            }
+
+            // Disconnect existing connection
+            if (this.socket) {
+                this.disconnect()
+            }
+
+            console.log('[Socket] Connecting to:', SOCKET_URL)
+
+            this.socket = io(SOCKET_URL, {
+                auth: { token },
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            })
+
+            this.socket.on('connect', () => {
+                console.log('[Socket] Connected, ID:', this.socket?.id)
                 this.isConnected = true
-                console.log('[Mock Socket] Connected')
-                this.emit('connect')
+                this.emit('connected')
                 resolve()
-            }, 300)
+            })
+
+            this.socket.on('disconnect', (reason) => {
+                console.log('[Socket] Disconnected:', reason)
+                this.isConnected = false
+                this.emit('disconnected', { reason })
+            })
+
+            this.socket.on('connect_error', (error) => {
+                console.error('[Socket] Connection error:', error.message)
+                reject(error)
+            })
+
+            this.socket.on('error', (data: { message: string }) => {
+                console.error('[Socket] Error:', data.message)
+                this.emit('error', data)
+            })
+
+            // Queue events
+            this.socket.on('queue_joined', (data: { position: number; message: string }) => {
+                console.log('[Socket] Queue joined:', data.message)
+                this.emit('queue_joined', data)
+            })
+
+            this.socket.on('queue_left', (data: { message: string }) => {
+                console.log('[Socket] Queue left:', data.message)
+                this.emit('queue_left', data)
+            })
+
+            // Match events
+            this.socket.on('match_found', (data: Match & { message?: string }) => {
+                console.log('[Socket] Match found:', data)
+                this.currentRoomId = data.roomId
+                this.partnerId = data.partnerId
+                this.emit('match_found', data)
+            })
+
+            this.socket.on('match_ended', (data: { reason: string }) => {
+                console.log('[Socket] Match ended:', data.reason)
+                this.currentRoomId = null
+                this.partnerId = null
+                this.emit('match_ended', data)
+            })
+
+            this.socket.on('chat_ended', (data: { message: string }) => {
+                console.log('[Socket] Chat ended:', data.message)
+                this.currentRoomId = null
+                this.partnerId = null
+                this.emit('chat_ended', data)
+            })
+
+            // Partner events
+            this.socket.on('partner_left', (data: { reason: string }) => {
+                console.log('[Socket] Partner left:', data.reason)
+                this.emit('partner_left', data)
+            })
+
+            this.socket.on('partner_disconnected', (data: { message: string; autoRejoin: boolean }) => {
+                console.log('[Socket] Partner disconnected:', data.message)
+                this.emit('partner_disconnected', data)
+            })
+
+            // WebRTC signaling events
+            this.socket.on('webrtc_offer', (data: { offer: RTCSessionDescriptionInit; senderId: string }) => {
+                console.log('[Socket] Received WebRTC offer')
+                this.emit('webrtc_offer', data)
+            })
+
+            this.socket.on('webrtc_answer', (data: { answer: RTCSessionDescriptionInit; senderId: string }) => {
+                console.log('[Socket] Received WebRTC answer')
+                this.emit('webrtc_answer', data)
+            })
+
+            this.socket.on('ice_candidate', (data: { candidate: RTCIceCandidateInit; senderId: string }) => {
+                console.log('[Socket] Received ICE candidate')
+                this.emit('ice_candidate', data)
+            })
+
+            // Ban notification
+            this.socket.on('banned', (data: { message: string; banExpiresAt: string; banReason: string }) => {
+                console.error('[Socket] User banned:', data.message)
+                this.emit('banned', data)
+            })
+
+            // Reconnection events
+            this.socket.on('reconnect', (attemptNumber: number) => {
+                console.log('[Socket] Reconnected after', attemptNumber, 'attempts')
+                this.isConnected = true
+                this.emit('reconnected', { attemptNumber })
+            })
+
+            this.socket.on('reconnect_attempt', (attemptNumber: number) => {
+                console.log('[Socket] Reconnection attempt', attemptNumber)
+                this.emit('reconnecting', { attemptNumber })
+            })
+
+            this.socket.on('reconnect_failed', () => {
+                console.error('[Socket] Reconnection failed')
+                this.emit('reconnect_failed')
+            })
         })
     }
 
-    // Disconnect
+    // Disconnect from server
     disconnect(): void {
-        this.isConnected = false
-        if (this.matchTimeout) {
-            clearTimeout(this.matchTimeout)
-            this.matchTimeout = null
-        }
-        console.log('[Mock Socket] Disconnected')
-    }
-
-    // Event handling
-    on(event: string, callback: EventCallback): void {
-        if (!this.eventListeners.has(event)) {
-            this.eventListeners.set(event, [])
-        }
-        this.eventListeners.get(event)!.push(callback)
-    }
-
-    off(event: string, callback?: EventCallback): void {
-        if (!callback) {
-            this.eventListeners.delete(event)
-        } else {
-            const listeners = this.eventListeners.get(event) || []
-            this.eventListeners.set(event, listeners.filter(cb => cb !== callback))
+        if (this.socket) {
+            this.socket.disconnect()
+            this.socket = null
+            this.isConnected = false
+            this.currentRoomId = null
+            this.partnerId = null
+            console.log('[Socket] Disconnected')
         }
     }
 
-    private emit(event: string, ...args: unknown[]): void {
-        const listeners = this.eventListeners.get(event) || []
-        listeners.forEach(cb => cb(...args))
-    }
-
-    // Join matchmaking queue
+    // Queue actions
     joinQueue(): void {
-        if (!this.isConnected) {
-            console.error('[Mock Socket] Not connected')
-            return
+        if (this.socket && this.isConnected) {
+            console.log('[Socket] Joining queue...')
+            this.socket.emit('join_queue')
         }
-
-        console.log('[Mock Socket] Joining queue...')
-        useMatchStore.getState().setQueueStatus('searching')
-
-        // Simulate finding a match after 2-4 seconds
-        const matchDelay = 2000 + Math.random() * 2000
-
-        this.matchTimeout = setTimeout(() => {
-            const match: Match = {
-                roomId: `room-${crypto.randomUUID().slice(0, 8)}`,
-                partnerId: `user-${crypto.randomUUID().slice(0, 8)}`,
-                partnerName: `Fluxx_${Math.floor(1000 + Math.random() * 9000)}`
-            }
-
-            console.log('[Mock Socket] Match found:', match)
-            useMatchStore.getState().setQueueStatus('matched')
-
-            // Short delay before connecting
-            setTimeout(() => {
-                useMatchStore.getState().setQueueStatus('connecting')
-                setTimeout(() => {
-                    useMatchStore.getState().setMatch(match)
-                    useMatchStore.getState().setQueueStatus('connected')
-                    useVideoStore.getState().setConnectionStatus('connected')
-                    this.emit('match_found', match)
-                }, 500)
-            }, 300)
-        }, matchDelay)
     }
 
-    // Leave queue
     leaveQueue(): void {
-        if (this.matchTimeout) {
-            clearTimeout(this.matchTimeout)
-            this.matchTimeout = null
+        if (this.socket && this.isConnected) {
+            console.log('[Socket] Leaving queue...')
+            this.socket.emit('leave_queue')
         }
-        useMatchStore.getState().setQueueStatus('idle')
-        console.log('[Mock Socket] Left queue')
     }
 
-    // End current chat
-    endChat(): void {
-        const matchStore = useMatchStore.getState()
-        const videoStore = useVideoStore.getState()
-
-        matchStore.setMatch(null)
-        matchStore.setQueueStatus('idle')
-        videoStore.setConnectionStatus('disconnected')
-
-        console.log('[Mock Socket] Chat ended')
-    }
-
-    // Next match (end current and rejoin queue)
+    // Match actions
     nextMatch(): void {
-        const matchStore = useMatchStore.getState()
-        const videoStore = useVideoStore.getState()
-
-        console.log('[Mock Socket] Finding next match...')
-
-        // Clear current match
-        matchStore.setMatch(null)
-        videoStore.setRemoteStream(null)
-        videoStore.setConnectionStatus('disconnected')
-
-        // Automatically rejoin queue
-        this.joinQueue()
-    }
-
-    // Simulate partner leaving (for testing)
-    simulatePartnerLeave(): void {
-        const matchStore = useMatchStore.getState()
-
-        if (matchStore.currentMatch) {
-            console.log('[Mock Socket] Partner left')
-            matchStore.setMatch(null)
-            useVideoStore.getState().setRemoteStream(null)
-            useVideoStore.getState().setConnectionStatus('disconnected')
-            this.emit('partner_left')
-
-            // Auto-rejoin if enabled
-            if (matchStore.autoRejoin) {
-                console.log('[Mock Socket] Auto-rejoining queue...')
-                setTimeout(() => this.joinQueue(), 500)
-            }
+        if (this.socket && this.isConnected) {
+            console.log('[Socket] Requesting next match...')
+            this.socket.emit('next_match')
         }
     }
 
-    // WebRTC signaling (mock - not actually used since we're mocking)
-    sendOffer(roomId: string, offer: RTCSessionDescriptionInit): void {
-        console.log('[Mock Socket] Sent offer for room:', roomId)
+    endChat(): void {
+        if (this.socket && this.isConnected) {
+            console.log('[Socket] Ending chat...')
+            this.socket.emit('end_chat')
+        }
     }
 
-    sendAnswer(roomId: string, answer: RTCSessionDescriptionInit): void {
-        console.log('[Mock Socket] Sent answer for room:', roomId)
+    // WebRTC signaling
+    sendWebRTCOffer(offer: RTCSessionDescriptionInit): void {
+        if (this.socket && this.isConnected && this.currentRoomId) {
+            console.log('[Socket] Sending WebRTC offer')
+            this.socket.emit('webrtc_offer', {
+                offer,
+                roomId: this.currentRoomId
+            })
+        }
     }
 
-    sendIceCandidate(roomId: string, candidate: RTCIceCandidateInit): void {
-        console.log('[Mock Socket] Sent ICE candidate for room:', roomId)
+    sendWebRTCAnswer(answer: RTCSessionDescriptionInit): void {
+        if (this.socket && this.isConnected && this.currentRoomId) {
+            console.log('[Socket] Sending WebRTC answer')
+            this.socket.emit('webrtc_answer', {
+                answer,
+                roomId: this.currentRoomId
+            })
+        }
     }
 
-    get connected(): boolean {
-        return this.isConnected
+    sendICECandidate(candidate: RTCIceCandidate): void {
+        if (this.socket && this.isConnected && this.currentRoomId) {
+            console.log('[Socket] Sending ICE candidate')
+            this.socket.emit('ice_candidate', {
+                candidate,
+                roomId: this.currentRoomId
+            })
+        }
+    }
+
+    // Event listener management
+    on(event: string, callback: (...args: unknown[]) => void): void {
+        if (!this.listeners.has(event)) {
+            this.listeners.set(event, new Set())
+        }
+        this.listeners.get(event)!.add(callback)
+    }
+
+    off(event: string, callback: (...args: unknown[]) => void): void {
+        const eventListeners = this.listeners.get(event)
+        if (eventListeners) {
+            eventListeners.delete(callback)
+        }
+    }
+
+    private emit(event: string, data?: unknown): void {
+        const eventListeners = this.listeners.get(event)
+        if (eventListeners) {
+            eventListeners.forEach(callback => callback(data))
+        }
     }
 }
 
-// Singleton instance
-export const socketService = new MockSocketService()
+// Export singleton instance
+export const socketService = new SocketService()

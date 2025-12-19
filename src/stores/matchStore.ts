@@ -9,6 +9,7 @@ interface MatchStore {
     // Actions
     setQueueStatus: (status: QueueStatus) => void
     setMatch: (match: Match | null) => void
+    setCurrentMatch: (match: Match | null) => void
     setAutoRejoin: (autoRejoin: boolean) => void
     reset: () => void
 }
@@ -21,6 +22,8 @@ export const useMatchStore = create<MatchStore>((set) => ({
     setQueueStatus: (queueStatus) => set({ queueStatus }),
 
     setMatch: (currentMatch) => set({ currentMatch }),
+
+    setCurrentMatch: (currentMatch) => set({ currentMatch }),
 
     setAutoRejoin: (autoRejoin) => set({ autoRejoin }),
 
