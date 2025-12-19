@@ -3,7 +3,6 @@ import type {
     User,
     RegisterPayload,
     LoginPayload,
-    VerifyPayload,
     ApiResponse,
     AuthResponseData,
     ReportPayload
@@ -71,38 +70,6 @@ export const api = {
         }
 
         throw new Error(response.message || 'Registration failed')
-    },
-
-    // Verify email with OTP
-    async verify(payload: VerifyPayload): Promise<{ success: boolean }> {
-        const response = await apiRequest<void>(
-            '/auth/verify-email',
-            'POST',
-            payload
-        )
-
-        if (response.success) {
-            console.log('[API] Verified user:', payload.email)
-            return { success: true }
-        }
-
-        throw new Error(response.message || 'Verification failed')
-    },
-
-    // Resend OTP
-    async resendOtp(email: string): Promise<{ otp?: string }> {
-        const response = await apiRequest<{ otp?: string }>(
-            '/auth/resend-otp',
-            'POST',
-            { email }
-        )
-
-        if (response.success) {
-            console.log('[API] Resent OTP for:', email)
-            return response.data || {}
-        }
-
-        throw new Error(response.message || 'Failed to resend OTP')
     },
 
     // Login

@@ -32,11 +32,6 @@ export interface LoginPayload {
     password: string
 }
 
-export interface VerifyPayload {
-    email: string
-    otp: string
-}
-
 // API Response wrapper
 export interface ApiResponse<T = unknown> {
     success: boolean
@@ -47,7 +42,6 @@ export interface ApiResponse<T = unknown> {
 export interface AuthResponseData {
     user: User
     token: string
-    otp?: string // Only returned after registration (dev mode)
 }
 
 // Match types

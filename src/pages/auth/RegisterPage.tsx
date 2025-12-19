@@ -6,7 +6,7 @@ import LiquidChrome from '../../components/LiquidChrome'
 
 export default function RegisterPage() {
     const navigate = useNavigate()
-    const { setPendingVerification, setLoading, setError, isLoading, error } = useAuthStore()
+    const { setUser, setToken, setLoading, setError, isLoading, error } = useAuthStore()
 
     const [displayName, setDisplayName] = useState('')
     const [displayNameError, setDisplayNameError] = useState('')
@@ -46,10 +46,11 @@ export default function RegisterPage() {
         setLoading(true)
 
         try {
-            await api.register({ displayName: displayName.toLowerCase(), email, password })
-            setPendingVerification(email, '')
-            // Navigate to verify page - user must check their email for OTP
-            navigate('/verify')
+            const result = await api.register({ displayName: displayName.toLowerCase(), email, password })
+            // User is automatically verified - set user and token, then go to app
+            setUser(result.user)
+            setToken(result.token)
+            navigate('/app')
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Registration failed')
         } finally {

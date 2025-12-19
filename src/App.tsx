@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import HomePage from './pages/HomePage'
 import RegisterPage from './pages/auth/RegisterPage'
-import VerifyPage from './pages/auth/VerifyPage'
 import LoginPage from './pages/auth/LoginPage'
 import MainPage from './pages/app/MainPage'
 import VideoChatPage from './pages/chat/VideoChatPage'
@@ -11,7 +10,7 @@ import VideoChatPage from './pages/chat/VideoChatPage'
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, token } = useAuthStore()
 
-  if (!token || !user?.isVerified) {
+  if (!token || !user) {
     return <Navigate to="/login" replace />
   }
 
@@ -22,7 +21,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AuthRoute({ children }: { children: React.ReactNode }) {
   const { user, token } = useAuthStore()
 
-  if (token && user?.isVerified) {
+  if (token && user) {
     return <Navigate to="/app" replace />
   }
 
@@ -48,7 +47,6 @@ function App() {
           </AuthRoute>
         } />
         <Route path="/signup" element={<Navigate to="/register" replace />} />
-        <Route path="/verify" element={<VerifyPage />} />
 
         {/* Protected Routes */}
         <Route path="/app" element={
