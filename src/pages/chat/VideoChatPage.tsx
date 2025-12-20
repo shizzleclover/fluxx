@@ -30,6 +30,35 @@ export default function VideoChatPage() {
     useEffect(() => {
         if (!currentMatch) return
 
+        let remoteVideoSetup = false
+
+        const playRemoteVideo = () => {
+            const video = remoteVideoRef.current
+            if (!video || !video.srcObject) return
+
+            // Ensure not muted for audio
+            video.muted = false
+
+            const playPromise = video.play()
+            if (playPromise !== undefined) {
+                playPromise
+                    .then(() => {
+                        console.log('[VideoChatPage] ✅ Remote video is playing!')
+                    })
+                    .catch(error => {
+                        console.warn('[VideoChatPage] Play failed, will retry:', error.message)
+                        // Retry after delay
+                        setTimeout(() => {
+                            if (video.srcObject) {
+                                video.play().catch(err => {
+                                    console.error('[VideoChatPage] Retry play failed:', err.message)
+                                })
+                            }
+                        }, 500)
+                    })
+            }
+        }
+
         const setupWebRTC = async () => {
             console.log('[VideoChatPage] Setting up WebRTC for room:', currentMatch.roomId)
             setConnectionStatus('connecting')
@@ -45,11 +74,29 @@ export default function VideoChatPage() {
             }
 
             webrtcService.onRemoteStream = (stream) => {
-                console.log('[VideoChatPage] Remote stream received')
+                console.log('[VideoChatPage] Remote stream received, tracks:', stream.getTracks().length)
                 setRemoteStream(stream)
-                if (remoteVideoRef.current) {
+
+                // CRITICAL: Set srcObject only once
+                if (remoteVideoRef.current && !remoteVideoSetup) {
+                    remoteVideoSetup = true
                     remoteVideoRef.current.srcObject = stream
-                    remoteVideoRef.current.play().catch(console.error)
+                    console.log('[VideoChatPage] Remote video srcObject set (one-time)')
+
+                    // Setup video event listeners
+                    remoteVideoRef.current.onloadedmetadata = () => {
+                        console.log('[VideoChatPage] Remote video metadata loaded')
+                        playRemoteVideo()
+                    }
+
+                    remoteVideoRef.current.oncanplay = () => {
+                        console.log('[VideoChatPage] Remote video can play')
+                        playRemoteVideo()
+                    }
+
+                    // Force load and play
+                    remoteVideoRef.current.load()
+                    playRemoteVideo()
                 }
             }
 
@@ -58,6 +105,8 @@ export default function VideoChatPage() {
                 if (state === 'connected') {
                     setConnectionStatus('connected')
                     setQueueStatus('connected')
+                    // Force play when connection is established
+                    setTimeout(() => playRemoteVideo(), 300)
                 } else if (state === 'failed' || state === 'disconnected') {
                     setConnectionStatus('failed')
                 }
@@ -73,6 +122,7 @@ export default function VideoChatPage() {
             webrtcService.onLocalStream = null
             webrtcService.onRemoteStream = null
             webrtcService.onConnectionStateChange = null
+            remoteVideoSetup = false
         }
     }, [currentMatch, setConnectionStatus, setQueueStatus, setLocalStream, setRemoteStream])
 

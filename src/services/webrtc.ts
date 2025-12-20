@@ -32,6 +32,9 @@ class WebRTCService {
     private peerConnection: RTCPeerConnection | null = null
     private localStream: MediaStream | null = null
     private remoteStream: MediaStream | null = null
+    // CRITICAL: Keep reference to prevent garbage collection
+    private remoteStreamReference: MediaStream | null = null
+    private remoteStreamSetup = false
 
     // Callbacks
     onLocalStream: ((stream: MediaStream) => void) | null = null
@@ -85,13 +88,15 @@ class WebRTCService {
             await this.getLocalStream()
         }
 
-        // Create remote stream container
+        // CRITICAL: Initialize remote stream early
         this.remoteStream = new MediaStream()
+        this.remoteStreamReference = null
+        this.remoteStreamSetup = false
 
         // Create peer connection
         this.peerConnection = new RTCPeerConnection(rtcConfig)
 
-        // Add local tracks to peer connection
+        // Add local tracks to peer connection BEFORE creating offer
         if (this.localStream) {
             this.localStream.getTracks().forEach(track => {
                 console.log(`[WebRTC] Adding local ${track.kind} track`)
@@ -99,18 +104,61 @@ class WebRTCService {
             })
         }
 
-        // Handle remote tracks
+        // CRITICAL: Handle remote tracks properly
         this.peerConnection.ontrack = (event) => {
             console.log(`[WebRTC] Received remote ${event.track.kind} track`)
 
+            let streamToUse: MediaStream | null = null
+
+            // Handle event.streams (preferred)
             if (event.streams && event.streams.length > 0) {
-                this.remoteStream = event.streams[0]
-            } else if (event.track) {
+                streamToUse = event.streams[0]
+                if (!this.remoteStreamReference) {
+                    this.remoteStreamReference = streamToUse
+                }
+                console.log(`[WebRTC] Using stream from event (${streamToUse.getTracks().length} tracks)`)
+            }
+            // Fallback: Handle event.track
+            else if (event.track) {
+                // Remove existing track of same kind
+                const existingTrack = this.remoteStream!.getTracks().find(t => t.kind === event.track.kind)
+                if (existingTrack) {
+                    this.remoteStream!.removeTrack(existingTrack)
+                    existingTrack.stop()
+                }
                 this.remoteStream!.addTrack(event.track)
+                streamToUse = this.remoteStream
+                if (!this.remoteStreamReference) {
+                    this.remoteStreamReference = streamToUse
+                }
+                console.log(`[WebRTC] Added track to stream (${this.remoteStream!.getTracks().length} tracks)`)
             }
 
-            if (this.onRemoteStream && this.remoteStream) {
-                this.onRemoteStream(this.remoteStream)
+            // CRITICAL: Enable track immediately
+            event.track.enabled = true
+
+            // CRITICAL: Call onRemoteStream only once
+            if (streamToUse && !this.remoteStreamSetup) {
+                this.remoteStreamSetup = true
+                console.log('[WebRTC] Remote stream assigned (one-time setup)')
+                if (this.onRemoteStream) {
+                    this.onRemoteStream(this.remoteStreamReference || streamToUse)
+                }
+            }
+
+            // Monitor track state
+            event.track.onmute = () => {
+                console.warn(`[WebRTC] Remote ${event.track.kind} track muted`)
+                // Re-enable track
+                event.track.enabled = true
+            }
+
+            event.track.onunmute = () => {
+                console.log(`[WebRTC] Remote ${event.track.kind} track unmuted`)
+            }
+
+            event.track.onended = () => {
+                console.log(`[WebRTC] Remote ${event.track.kind} track ended`)
             }
         }
 
@@ -148,6 +196,17 @@ class WebRTCService {
 
             if (this.onICEStateChange) {
                 this.onICEStateChange(state as RTCIceConnectionState)
+            }
+
+            if (state === 'connected' || state === 'completed') {
+                console.log('[WebRTC] ✅ ICE connection successful!')
+                // Log receiver info for debugging
+                const receivers = this.peerConnection?.getReceivers() || []
+                console.log(`[WebRTC] Found ${receivers.length} receiver(s)`)
+                receivers.forEach((receiver, idx) => {
+                    const track = receiver.track
+                    console.log(`[WebRTC] Receiver ${idx}: ${track.kind}, enabled=${track.enabled}, muted=${track.muted}`)
+                })
             }
 
             if (state === 'failed') {
@@ -210,8 +269,15 @@ class WebRTCService {
 
         if (!this.peerConnection) return
 
+        // Check signaling state
+        if (this.peerConnection.signalingState !== 'stable') {
+            console.log('[WebRTC] Signaling state not stable, current:', this.peerConnection.signalingState)
+            return
+        }
+
         try {
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+            console.log('[WebRTC] Remote description set (offer)')
 
             const answer = await this.peerConnection.createAnswer({
                 offerToReceiveAudio: true,
@@ -230,6 +296,25 @@ class WebRTCService {
     private async handleAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
         if (!this.peerConnection) return
 
+        // CRITICAL: Check signaling state before setting remote description
+        const currentState = this.peerConnection.signalingState
+        console.log('[WebRTC] Current signaling state:', currentState)
+
+        if (currentState === 'stable') {
+            console.log('[WebRTC] Connection already stable - may be connected via ICE')
+            // Check if we already have remote tracks
+            const receivers = this.peerConnection.getReceivers()
+            if (receivers.length > 0) {
+                console.log(`[WebRTC] Already have ${receivers.length} remote track(s), connection likely established`)
+            }
+            return
+        }
+
+        if (currentState !== 'have-local-offer') {
+            console.warn('[WebRTC] Unexpected signaling state:', currentState)
+            return
+        }
+
         try {
             await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
             console.log('[WebRTC] Answer received, connection established')
@@ -243,8 +328,12 @@ class WebRTCService {
         if (!this.peerConnection) return
 
         try {
-            await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
-            console.log('[WebRTC] ICE candidate added')
+            if (candidate) {
+                await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+                console.log('[WebRTC] ICE candidate added')
+            } else {
+                console.log('[WebRTC] End of ICE candidates')
+            }
         } catch (error) {
             console.error('[WebRTC] Error adding ICE candidate:', error)
         }
@@ -306,8 +395,13 @@ class WebRTCService {
             this.peerConnection = null
         }
 
-        // Clear remote stream
+        // Clear remote stream references
+        if (this.remoteStreamReference) {
+            this.remoteStreamReference.getTracks().forEach(track => track.stop())
+            this.remoteStreamReference = null
+        }
         this.remoteStream = null
+        this.remoteStreamSetup = false
 
         console.log('[WebRTC] Cleaned up')
     }
@@ -325,7 +419,7 @@ class WebRTCService {
 
     // Get current remote stream
     getRemoteStream(): MediaStream | null {
-        return this.remoteStream
+        return this.remoteStreamReference || this.remoteStream
     }
 }
 
